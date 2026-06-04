@@ -13,10 +13,15 @@
      CONFIG below is also overridden by Apps Script (see Code.gs).
      ════════════════════════════════════════════════════════════════ -->
 <script>
-  /* ▼▼▼  EDIT THESE TWO LINES (used for the email/print fallback)  ▼▼▼ */
+  /* ▼▼▼  EDIT THESE LINES (used for the email/print fallback & trust line)  ▼▼▼ */
   window.VMRC_CONFIG = {
     coordinatorName:  "Justin Chao",
     coordinatorEmail: "jchao@vmrc.net",  /* recipient for the email/Gmail fallback */
+    coordinatorPhone: "",                /* optional — if set (e.g. "(209) 555-0123") the welcome screen shows a "prefer to call?" option */
+    familyReceipt: true,                 /* set false if you have NOT turned on SEND_FAMILY_RECEIPT in Code.gs (keeps the thank-you screen from promising an email that won't arrive) */
+    /* Light anti-spam: this must match CONFIG.TOKEN in Code.gs. (It's visible in
+       the page source, so it only deters dumb bots — the honeypot is the real filter.) */
+    token: "vmrc-intake-7Qk2",
     /* When the form is hosted off Apps Script (e.g. GitHub Pages), it POSTs
        submissions to this Apps Script /exec URL, which saves them to your Sheet. */
     webAppUrl: "https://script.google.com/macros/s/AKfycbzDEGPoexUfe4jy8m3SGgUrX719MIN-StqGcXKxzeEu5rTBKTaVa1ZroMksnKT2Cj90/exec"
@@ -245,6 +250,39 @@
   .err{color:#c0392b;font-size:13px;font-weight:600;margin-top:8px;display:none}
   .footer{text-align:center;font-size:11px;color:var(--muted);padding:14px;opacity:.85}
   .lockicon{font-size:11px}
+
+  /* ── Keyboard accessibility: clear focus rings on every tap-target ── */
+  .chip:focus-visible,.seg:focus-visible,.btn:focus-visible,.iconbtn:focus-visible,
+  .edit:focus-visible,.addbtn:focus-visible,.addother-btn:focus-visible,
+  .dd-head:focus-visible,.eng-row:focus-visible,.langpick .chip:focus-visible{
+    outline:3px solid var(--cyan);outline-offset:2px;border-radius:8px;
+  }
+  [data-theme="dark"] .chip:focus-visible,[data-theme="dark"] .seg:focus-visible{outline-color:#9fe0f3}
+  .chip[role=button]{ -webkit-tap-highlight-color:transparent }
+
+  /* tip callout (e.g. "have meds handy") */
+  .tipbox{display:flex;gap:8px;align-items:flex-start;background:#fff8e1;border:1px solid #f0d77a;
+    color:#7a5b00;border-radius:11px;padding:10px 12px;font-size:13px;margin:2px 0 6px;line-height:1.45}
+  [data-theme="dark"] .tipbox{background:#332c16;border-color:#5f5320;color:#f1c40f}
+  /* info note (e.g. Medic Alert "want info") */
+  .notebox{display:flex;gap:8px;align-items:flex-start;background:#e8f4fb;border:1px solid #bcdcee;
+    color:#1e5a7a;border-radius:11px;padding:11px 13px;font-size:13.5px;line-height:1.45}
+  [data-theme="dark"] .notebox{background:#10293a;border-color:#244a60;color:#9fe0f3}
+
+  /* welcome personalization + trust line */
+  .welcome .hello{font-size:19px;font-weight:800;color:var(--navy);margin-bottom:2px}
+  [data-theme="dark"] .welcome .hello{color:var(--cyan)}
+  .trust{max-width:440px;margin:16px auto 0;background:var(--chip);border:1px solid var(--chipline);
+    border-radius:12px;padding:11px 14px;font-size:12.8px;color:var(--muted);display:flex;gap:9px;
+    align-items:flex-start;text-align:left;line-height:1.5}
+  .trust .ti{flex:none;font-size:15px}
+  .trust b{color:var(--ink)}
+
+  /* warmer thank-you "what's next" list */
+  .done-next{text-align:left;max-width:410px;margin:20px auto 0;display:grid;gap:10px}
+  .done-next div{font-size:14px;display:flex;gap:11px;align-items:flex-start;background:var(--card);
+    border:1px solid var(--line);border-radius:12px;padding:11px 13px}
+  .done-next .e{font-size:18px;flex:none}
 </style>
 </head>
 <body>
@@ -268,7 +306,14 @@
 
 <div class="footer">
   🔒 <span id="footPriv">Your answers are private and saved only on this device until you press Send.</span>
-  <span style="opacity:.55"> · build 4 (web)</span>
+</div>
+
+<!-- Honeypot: invisible to people, but spam bots fill every field they find.
+     If this comes back filled, the submission is discarded as spam. We move it
+     off-screen rather than display:none (some bots skip display:none fields). -->
+<div aria-hidden="true" style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden">
+  <label for="vmrc_company">Company (leave this field empty)</label>
+  <input type="text" id="vmrc_company" name="company" tabindex="-1" autocomplete="off">
 </div>
 
 <script>
@@ -381,7 +426,9 @@ const STEPS = [
       {key:"allergies", type:"chips", single:1, noneable:1, label:{en:"Any allergies? (food or medicine)",es:"¿Alguna alergia? (comida o medicina)"},
         options:[{v:"None",en:"None / No known allergies",es:"Ninguna / Sin alergias conocidas",none:1},{v:"Yes",en:"Yes — list below",es:"Sí — anote abajo"}]},
       {key:"allergies_list", type:"text", optional:1, showIf:["allergies","Yes"], label:{en:"What are they allergic to?",es:"¿A qué es alérgico?"}, ph:{en:"List allergies and reactions",es:"Anote alergias y reacciones"}},
-      {key:"medications", type:"repeat", repeatKind:"med", optional:1, label:{en:"Current medications",es:"Medicamentos actuales"}, hint:{en:"Start typing to pick from common medications — a typical dose fills in automatically (you can change it). Tap + to add more, or type any medication.",es:"Empiece a escribir para elegir de medicamentos comunes — la dosis típica se llena automáticamente (puede cambiarla). Toque + para agregar más, o escriba cualquier medicamento."}},
+      {key:"medications", type:"repeat", repeatKind:"med", optional:1, label:{en:"Current medications",es:"Medicamentos actuales"},
+        tip:{en:"Tip: grab their medicine bottles before you start — the label shows the exact name and dose.",es:"Consejo: tome los frascos de medicina antes de comenzar — la etiqueta muestra el nombre y la dosis exactos."},
+        hint:{en:"Start typing to pick from common medications — a typical dose fills in automatically (you can change it). Tap + to add more, or type any medication.",es:"Empiece a escribir para elegir de medicamentos comunes — la dosis típica se llena automáticamente (puede cambiarla). Toque + para agregar más, o escriba cualquier medicamento."}},
       {key:"doctor", type:"text", optional:1, label:{en:"Primary doctor — name & phone",es:"Médico principal — nombre y teléfono"}, ph:{en:"Dr. name, clinic, phone",es:"Dr. nombre, clínica, teléfono"}},
       {key:"doctor_last", type:"text", optional:1, label:{en:"Last doctor visit",es:"Última visita al médico"}, ph:{en:"Month / year",es:"Mes / año"}},
       {key:"dentist", type:"text", optional:1, label:{en:"Dentist — name & last visit",es:"Dentista — nombre y última visita"}, ph:{en:"Name, month/year",es:"Nombre, mes/año"}},
@@ -468,9 +515,11 @@ const STEPS = [
         ]},
       {key:"medic_alert", type:"chips", single:1, label:{en:"Do they have a Medic Alert ID?",es:"¿Tienen identificación Medic Alert?"},
         options:[{v:"Yes",en:"Yes",es:"Sí"},{v:"No",en:"No",es:"No"},{v:"Want info",en:"Would like info",es:"Quisiera información"}]},
-      {key:"medic_alert_engrave", type:"engrave", optional:1, showIf:["medic_alert",["Yes","Want info"]],
+      {key:"medic_alert_engrave", type:"engrave", optional:1, showIf:["medic_alert","Yes"],
         label:{en:"What should be engraved on the Medic Alert ID?",es:"¿Qué debe grabarse en la identificación Medic Alert?"},
         hint:{en:"We filled these in from your earlier answers — uncheck any you don't want, and add the emergency contact phone number.",es:"Llenamos esto con sus respuestas anteriores — desmarque lo que no quiera, y agregue el teléfono de contacto de emergencia."}},
+      {key:"medic_alert_info_note", type:"note", showIf:["medic_alert","Want info"],
+        label:{en:"Great — your coordinator will bring Medic Alert information to your meeting so you can decide if it's a good fit.",es:"Excelente — su coordinador traerá información sobre Medic Alert a su reunión para que decida si es adecuado."}},
       {key:"safety_notes", type:"textarea", optional:1, label:{en:"Anything else we should know to keep them safe?",es:"¿Algo más para mantenerlos seguros?"}, ph:{en:"Optional",es:"Opcional"}},
     ]},
 
@@ -666,7 +715,18 @@ function renderStepper(){
 function renderWelcome(){
   const d = document.createElement("div");
   d.className = "step active welcome";
+  // Personalized greeting from a ?name= link (e.g. ...github.io/?name=Maria). We
+  // only use it for a friendly hello — never prefill PHI from the URL.
+  const inviteName = (new URLSearchParams(location.search).get("name")||"").trim().slice(0,40);
+  const coordName  = window.VMRC_CONFIG.coordinatorName || "your coordinator";
+  const coordPhone = (window.VMRC_CONFIG.coordinatorPhone||"").trim();
+  const phoneLine  = coordPhone
+    ? (lang==="es"?`¿Prefiere hacerlo por teléfono? Llame a ${esc(coordName)} al ${esc(coordPhone)}.`
+                 :`Prefer to do this by phone? Call ${esc(coordName)} at ${esc(coordPhone)}.`)
+    : (lang==="es"?"¿Prefiere hacerlo por teléfono? Solo responda al mensaje que le enviaron y le llamarán."
+                 :"Prefer to do this by phone? Just reply to the message they sent and they'll call you.");
   d.innerHTML = `
+    ${ inviteName ? `<div class="hello">${lang==="es"?"¡Hola":"Hi"} ${esc(inviteName)}! 👋</div>` : "" }
     <div class="big">📋</div>
     <h1>${lang==="es"?"Preparémonos para su reunión":"Let's get ready for your meeting"}</h1>
     <p>${lang==="es"
@@ -678,9 +738,15 @@ function renderWelcome(){
       <div><span class="e">✅</span><span>${lang==="es"?"Casi todo es opcional — comparta lo que pueda":"Almost everything is optional — share what you can"}</span></div>
       <div><span class="e">🔒</span><span>${lang==="es"?"Privado hasta que presione Enviar":"Private until you press Send"}</span></div>
     </div>
+    <div class="trust">
+      <span class="ti">🛡️</span>
+      <span>${lang==="es"
+        ? `Este formulario seguro fue enviado por <b>${esc(coordName)}</b>, su Coordinador de Servicios de VMRC. ${phoneLine}`
+        : `This secure form was sent to you by <b>${esc(coordName)}</b>, your VMRC Service Coordinator. ${phoneLine}`}</span>
+    </div>
     <div class="langpick">
-      <div class="chip ${lang==="en"?"on":""}" data-l="en">🇺🇸 English</div>
-      <div class="chip ${lang==="es"?"on":""}" data-l="es">🇲🇽 Español</div>
+      <div class="chip ${lang==="en"?"on":""}" role="button" tabindex="0" aria-pressed="${lang==="en"}" data-l="en">🇺🇸 English</div>
+      <div class="chip ${lang==="es"?"on":""}" role="button" tabindex="0" aria-pressed="${lang==="es"}" data-l="es">🇲🇽 Español</div>
     </div>
     <div class="nav"><button class="btn primary" id="startBtn">${tx(T.start)} →</button></div>
     ${ hasDraft() ? `<div class="saved">↩︎ <b>${lang==="es"?"Tiene progreso guardado — continuará donde quedó.":"You have saved progress — you'll pick up where you left off."}</b></div>` : "" }
@@ -708,9 +774,14 @@ function renderStep(step){
 }
 
 function fieldHTML(f){
+  const hide = (f.showIf && !showIfMet(f)) ? `style="display:none"` : "";
+  // info-only note (no input) — e.g. Medic Alert "would like info"
+  if (f.type==="note"){
+    return `<div class="field" data-fieldkey="${f.key}" ${hide}><div class="notebox"><span>ℹ️</span><span>${tx(f.label)}</span></div></div>`;
+  }
   const optTag = f.optional ? `<span class="opt">${lang==="es"?"opcional":"optional"}</span>` : "";
   const hint = f.hint ? `<div class="hint">${tx(f.hint)}</div>` : "";
-  const hide = (f.showIf && !showIfMet(f)) ? `style="display:none"` : "";
+  const tip  = f.tip ? `<div class="tipbox"><span>💊</span><span>${tx(f.tip)}</span></div>` : "";
   let inner = "";
   if (["text","tel","email","date"].includes(f.type)){
     inner = `<input type="${f.type}" data-key="${f.key}" value="${esc(data[f.key]||"")}" placeholder="${tx(f.ph)||""}">`;
@@ -719,10 +790,10 @@ function fieldHTML(f){
   } else if (f.type==="chips"){
     const sel = toArr(data[f.key]);
     const optVals = f.options.map(o=>o.v);
-    let chipsHtml = f.options.map(o=>`<div class="chip ${o.none?"none":""} ${sel.includes(o.v)?"on":""}" data-v="${esc(o.v)}" data-none="${o.none?1:0}">${o[lang]??o.en}</div>`).join("");
+    let chipsHtml = f.options.map(o=>`<div class="chip ${o.none?"none":""} ${sel.includes(o.v)?"on":""}" role="button" tabindex="0" aria-pressed="${sel.includes(o.v)?"true":"false"}" data-v="${esc(o.v)}" data-none="${o.none?1:0}">${o[lang]??o.en}</div>`).join("");
     if (f.addOther){
       const customs = sel.filter(v=>!optVals.includes(v));
-      chipsHtml += customs.map(v=>`<div class="chip custom" data-v="${esc(v)}" data-custom="1">${esc(v)} <span class="cx">✕</span></div>`).join("");
+      chipsHtml += customs.map(v=>`<div class="chip custom" role="button" tabindex="0" aria-label="${esc(v)} (remove)" data-v="${esc(v)}" data-custom="1">${esc(v)} <span class="cx">✕</span></div>`).join("");
     }
     inner = `<div class="chips" data-key="${f.key}" data-single="${f.single?1:0}">${chipsHtml}</div>`;
     if (f.addOther){
@@ -759,7 +830,7 @@ function fieldHTML(f){
   }
   const labelFor = ["chips","repeat","dropdown","engrave"].includes(f.type) ? "div" : "label";
   return `<div class="field" data-fieldkey="${f.key}" ${hide}>
-      <${labelFor}>${tx(f.label)} ${optTag}</${labelFor}>${hint}${inner}</div>`;
+      <${labelFor}>${tx(f.label)} ${optTag}</${labelFor}>${hint}${tip}${inner}</div>`;
 }
 
 /* ── Medic Alert engraving: auto-filled from earlier answers ── */
@@ -815,7 +886,7 @@ function wireOneField(step,f,node){
         else if(isNone){ sel=sel.includes(v)?[]:[v]; }      // "None" clears others
         else { sel=sel.filter(x=>!isNoneVal(box,x)); sel = sel.includes(v)?sel.filter(x=>x!==v):[...sel,v]; }
         data[key]=sel; persist(true);
-        box.querySelectorAll(".chip:not(.custom)").forEach(c=>c.classList.toggle("on",sel.includes(c.dataset.v)));
+        box.querySelectorAll(".chip:not(.custom)").forEach(c=>{ const on=sel.includes(c.dataset.v); c.classList.toggle("on",on); c.setAttribute("aria-pressed",on?"true":"false"); });
         applyShowIf(step);
       };
     });
@@ -964,7 +1035,7 @@ function renderReview(){
       <h2>${lang==="es"?"Revise sus respuestas":"Review your answers"}</h2>
       <p>${lang==="es"?"Verifique todo y presione Enviar. Puede editar cualquier sección.":"Check everything, then press Send. You can edit any section."}</p></div></div>`;
   STEPS.forEach((step,si)=>{
-    const items=step.fields.map(f=>{
+    const items=step.fields.filter(f=>f.type!=="note").map(f=>{
       const val=displayVal(f);
       return `<div class="rev-item"><div class="k">${tx(f.label)}</div><div class="v ${val?"":"empty"}">${val?esc(val):tx(T.blank)}</div></div>`;
     }).join("");
@@ -994,13 +1065,19 @@ function renderReview(){
 
 function renderDone(){
   const d=document.createElement("div"); d.className="step active done";
-  const name=window.VMRC_CONFIG.coordinatorName||"your coordinator";
+  const name=esc(window.VMRC_CONFIG.coordinatorName||"your coordinator");
+  const gaveEmail=(data.respondent_email||"").trim();
   d.innerHTML=`<div class="check">✓</div>
-    <h1>${lang==="es"?"¡Gracias!":"Thank you!"}</h1>
+    <h1>${lang==="es"?"¡Gracias! 💚":"Thank you! 💚"}</h1>
     <p>${lang==="es"
-      ? `Sus respuestas fueron enviadas a ${name}. Las usará para prepararse para su reunión del IPP. Se pondrá en contacto si necesita algo más.`
-      : `Your answers were sent to ${name}. They'll use them to prepare for your IPP meeting and will reach out if anything else is needed.`}</p>
-    <p style="margin-top:14px">${lang==="es"?"Ya puede cerrar esta página.":"You can now close this page."}</p>`;
+      ? `Sus respuestas fueron enviadas de forma segura a <b>${name}</b>. Las revisará antes de su reunión del IPP para que el tiempo juntos se enfoque en usted y su ser querido — no en el papeleo.`
+      : `Your answers were sent securely to <b>${name}</b>. They'll review everything before your IPP meeting so your time together can focus on you and your loved one — not paperwork.`}</p>
+    <div class="done-next">
+      <div><span class="e">📅</span><span>${lang==="es"?"A continuación: su coordinador confirmará la fecha y hora de su reunión.":"Next: your coordinator will confirm your meeting date and time."}</span></div>
+      <div><span class="e">✏️</span><span>${lang==="es"?"¿Olvidó algo? Puede volver a abrir este enlace y enviar de nuevo.":"Forgot something? You can reopen this link and send again."}</span></div>
+      ${(gaveEmail && window.VMRC_CONFIG.familyReceipt!==false)?`<div><span class="e">📧</span><span>${lang==="es"?`Enviamos una confirmación a ${esc(gaveEmail)}.`:`We've sent a confirmation to ${esc(gaveEmail)}.`}</span></div>`:""}
+    </div>
+    <p style="margin-top:16px">${lang==="es"?"Ya puede cerrar esta página. 🌿":"You can now close this page. 🌿"}</p>`;
   stage.appendChild(d);
 }
 
@@ -1010,10 +1087,11 @@ function renderDone(){
 function buildPayload(){
   const answers={};
   const SKIP=["legal_name","preferred_name","uci","dob"];  // captured at top level; avoid duplicate Sheet columns
-  STEPS.forEach(s=>s.fields.forEach(f=>{ if(!SKIP.includes(f.key)) answers[f.key]=displayVal(f); }));
+  STEPS.forEach(s=>s.fields.forEach(f=>{ if(f.type!=="note" && !SKIP.includes(f.key)) answers[f.key]=displayVal(f); }));
   return {
     submittedAt: new Date().toISOString(),
     lang,
+    token: window.VMRC_CONFIG.token||"",   // light anti-spam (validated by Code.gs)
     legal_name: data.legal_name||"",
     preferred_name: data.preferred_name||"",
     uci: data.uci||"",
@@ -1026,6 +1104,10 @@ function buildPayload(){
 function submit(){
   const btn=document.getElementById("sendBtn"); const err=document.getElementById("sendErr");
   err.style.display="none";
+  // Honeypot: a real person can't see/fill this field, so if it has a value it's
+  // a bot. Pretend it worked (show the thank-you) but never send or save it.
+  const hp=document.getElementById("vmrc_company");
+  if(hp && hp.value.trim()){ clearDraft(); idx=STEPS.length+1; render(); return; }
   if(!(data.legal_name||"").trim()){
     err.textContent = lang==="es"?"Por favor ingrese el nombre de la persona (paso 1).":"Please enter the person's name (step 1).";
     err.style.display="block"; idx=0; setTimeout(()=>{persist();render();},900); return;
@@ -1148,12 +1230,22 @@ document.getElementById("langBtn").textContent = lang==="en"?"🌐 ES":"🌐 EN"
 // close any open dropdown when tapping elsewhere
 document.addEventListener("click",()=>closeAllDropdowns());
 
+// Keyboard activation for div-based tap targets (chips & language picker):
+// Enter or Space triggers the same handler as a click, so the form is fully
+// usable without a mouse / touch.
+document.addEventListener("keydown",e=>{
+  const t=e.target;
+  if(t && t.classList && t.classList.contains("chip") && (e.key==="Enter"||e.key===" "||e.key==="Spacebar")){
+    e.preventDefault(); t.click();
+  }
+});
+
 try { render(); }
 catch(err){
   try { document.getElementById("stage").innerHTML =
     '<div style="margin:18px;padding:16px;border:2px solid #c0392b;border-radius:12px;'
     + 'background:#fdecea;color:#7a1f17;font:13px/1.55 ui-monospace,Consolas,monospace;white-space:pre-wrap">'
-    + '⚠️ render() error (build 3):\n\n' + (err && err.message) + '\n\n' + ((err && err.stack)||'')
+    + '⚠️ The form hit an error:\n\n' + (err && err.message) + '\n\n' + ((err && err.stack)||'')
     + '\n\nScreenshot this and send it to your coordinator.</div>'; } catch(_){}
 }
 </script>
