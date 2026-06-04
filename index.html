@@ -22,9 +22,10 @@
     /* Light anti-spam: this must match CONFIG.TOKEN in Code.gs. (It's visible in
        the page source, so it only deters dumb bots — the honeypot is the real filter.) */
     token: "vmrc-intake-7Qk2",
-    /* When the form is hosted off Apps Script (e.g. GitHub Pages), it POSTs
-       submissions to this Apps Script /exec URL, which saves them to your Sheet. */
-    webAppUrl: "https://script.google.com/macros/s/AKfycbxBihIL_8nBiBOaYm6IpLZOlqMrVots8DTbvE7ClB6GByY_4LBLLhIpO4f5r106qMQ/exec"
+    /* CLOUD SUBMISSION DISABLED (privacy). The form does NOT POST anywhere; families
+       hand their answers to the coordinator locally (copy / email / download). Leave
+       this empty. (Old Apps Script /exec target removed on 2026-06-04.) */
+    webAppUrl: ""
   };
   /* ▲▲▲  Everything else is automatic.  ▲▲▲ */
 </script>
@@ -1049,7 +1050,7 @@ function renderReview(){
     <div class="err" id="sendErr"></div>
     <div class="fallback" id="fallback">
       <h3>${lang==="es"?"Envíe sus respuestas a su coordinador":"Send your answers to your coordinator"}</h3>
-      <p>${lang==="es"?"Copie el resumen o ábralo en su correo y envíelo a su coordinador.":"Copy the summary or open it in your email and send it to your coordinator."}</p>
+      <p>${lang==="es"?"Copie el resumen o ábralo en su correo y envíelo a su coordinador. <b>Su información no se envía por internet</b> — va únicamente al coordinador a quien usted la envíe.":"Copy the summary or open it in your email and send it to your coordinator. <b>Your information is not sent over the internet</b> — it goes only to the coordinator you send it to."}</p>
       <textarea id="fallbackText" readonly></textarea>
       <div class="fbtns">
         <button class="btn blue" id="copyBtn">📋 ${lang==="es"?"Copiar":"Copy"}</button>
@@ -1112,30 +1113,13 @@ function submit(){
     err.textContent = lang==="es"?"Por favor ingrese el nombre de la persona (paso 1).":"Please enter the person's name (step 1).";
     err.style.display="block"; idx=0; setTimeout(()=>{persist();render();},900); return;
   }
-  btn.disabled=true; btn.textContent = lang==="es"?"Enviando…":"Sending…";
   const payload=buildPayload();
-
-  // Path 1: served by Apps Script
-  if (window.google && google.script && google.script.run){
-    google.script.run
-      .withSuccessHandler(()=>{ clearDraft(); idx=STEPS.length+1; render(); })
-      .withFailureHandler(()=>{ showFallback(payload); btn.disabled=false; btn.textContent=tx(T.send); })
-      .submitIntake(payload);
-    return;
-  }
-  // Path 2: hosted elsewhere (e.g. GitHub Pages) → POST to Apps Script.
-  // Apps Script can't send CORS headers cross-origin, so use no-cors: the POST
-  // still reaches doPost and saves to the Sheet; we can't read the reply, so we
-  // optimistically show the thank-you once the request goes out.
-  const url = window.VMRC_CONFIG.webAppUrl;
-  if (url){
-    fetch(url,{method:"POST",mode:"no-cors",body:JSON.stringify(payload)})
-      .then(()=>{ clearDraft(); idx=STEPS.length+1; render(); })
-      .catch(()=>{ showFallback(payload); btn.disabled=false; btn.textContent=tx(T.send); });
-    return;
-  }
-  // Path 3: standalone — copy / email fallback (the backup)
-  showFallback(payload); btn.disabled=false; btn.textContent=tx(T.send);
+  // ── CLOUD SUBMISSION DISABLED (privacy / Option C) ──────────────────────────
+  // The form NEVER transmits anything — no Apps Script call, no Google Sheet, no
+  // network request of any kind. The family hands their answers to the coordinator
+  // directly via the Copy / Email / Download options below, so the information goes
+  // ONLY to the coordinator they choose to send it to. Nothing is stored online.
+  showFallback(payload);
 }
 
 function summaryText(p){
@@ -1156,7 +1140,10 @@ function summaryText(p){
     ? "DATOS PARA SU COORDINADOR — por favor no borre estas líneas:\n"
     : "DATA FOR YOUR COORDINATOR — please keep these lines:\n");
   s += "----- VMRC-IPP-DATA -----\n";
-  s += JSON.stringify({ submittedAt:p.submittedAt, legal_name:p.legal_name, preferred_name:p.preferred_name, uci:p.uci, dob:p.dob, answers:p.answers }) + "\n";
+  // Full structured payload so the coordinator's IPP tool can pull in as much as
+  // possible (header fields + a "Family Intake" reference panel). This travels only
+  // to the coordinator the family sends it to — cloud submission is OFF.
+  s += JSON.stringify({ submittedAt:p.submittedAt, legal_name:p.legal_name, preferred_name:p.preferred_name, uci:p.uci, dob:p.dob, lang:p.lang, answers:p.answers }) + "\n";
   s += "----- END -----\n";
   return s;
 }
