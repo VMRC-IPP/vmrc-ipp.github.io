@@ -1401,40 +1401,91 @@ function pageSpeechChunks(){
   });
   return out;
 }
-function ttsVoiceOK(){
-  if(!("speechSynthesis" in window)) return false;
-  const want=(SPEECH_LOCALE[lang]||"").slice(0,2);
-  if(!want) return false;                            // no TTS exists for Hmong
-  const vs=speechSynthesis.getVoices();
-  if(!vs.length) return true;                        // list not loaded yet — try anyway
-  return vs.some(v=>(v.lang||"").toLowerCase().indexOf(want)===0);
+/* Clip-first player: pre-generated soft female neural voice clips (Jenny/Dalia/
+   HoaiMy/Blessica) are fetched from the site's audio/ folder — same warm voice on
+   EVERY device, no language pack needed. Dynamic text (the family's own answers,
+   substituted names) falls back to a female-preferred device voice, softened.
+   Clips are keyed by fnv64 of the display text; gen_audio.py mirrors the hash.
+   Punjabi has no neural voice offered; Hmong has no TTS anywhere — both use the
+   device fallback, and human-recorded clips can be dropped into audio/pa|hmn/. */
+const AUDIO_BASE = window.VMRC_AUDIO_BASE ||
+  (location.protocol==="file:" ? "https://vmrc-ipp.github.io/audio/" : "audio/");
+const CLIP_LANGS = {en:1,es:1,vi:1,tl:1,pa:1,hmn:1};  // folders probed; missing clip → fallback
+function fnv64(str){
+  const b=new TextEncoder().encode(str.normalize("NFC").replace(/\s+/g," ").trim());
+  let h=0xcbf29ce484222325n;
+  for(const x of b){ h^=BigInt(x); h=(h*0x100000001b3n)&0xffffffffffffffffn; }
+  return h.toString(16).padStart(16,"0");
 }
+let audioEl=null, speakToken=0;
+window.__readPlan=[];   // {t,mode:"clip"|"tts"} — observability + test hook
 function stopSpeak(){
-  if("speechSynthesis" in window) speechSynthesis.cancel();
+  speakToken++;
+  if(audioEl){ try{ audioEl.pause(); }catch(e){} audioEl=null; }
+  if("speechSynthesis" in window) try{ speechSynthesis.cancel(); }catch(e){}
   const b=document.getElementById("readBtn");
   if(b){ b.classList.remove("on"); b.setAttribute("aria-pressed","false"); b.textContent="🔊"; }
 }
-function speakPage(){
-  const b=document.getElementById("readBtn");
-  if(!("speechSynthesis" in window) || !ttsVoiceOK()){
-    alert(X("Sorry — no {0} voice is installed on this device, so read-aloud isn't available.","Lo sentimos — este dispositivo no tiene una voz en {0}, así que la lectura en voz alta no está disponible.",[langName(lang)]));
-    return;
-  }
-  const want=(SPEECH_LOCALE[lang]||"en-US");
-  const vs=speechSynthesis.getVoices();
-  const voice=vs.find(v=>(v.lang||"").toLowerCase().indexOf(want.slice(0,2))===0)||null;
-  const chunks=pageSpeechChunks();
-  if(!chunks.length) return;
-  b.classList.add("on"); b.setAttribute("aria-pressed","true"); b.textContent="⏹";
-  chunks.forEach((c,i)=>{
-    const u=new SpeechSynthesisUtterance(c);
-    u.lang=want; if(voice) u.voice=voice; u.rate=0.95;
-    if(i===chunks.length-1) u.onend=()=>stopSpeak();
-    speechSynthesis.speak(u);
+function playClip(text,tok){
+  return new Promise(res=>{
+    const a=new Audio(AUDIO_BASE+lang+"/"+fnv64(text)+".mp3");
+    audioEl=a;
+    let started=false, settled=false;
+    const done=ok=>{ if(settled) return; settled=true;
+      if(ok) window.__readPlan.push({t:text,mode:"clip"});
+      res(ok); };
+    a.onplaying=()=>{ started=true; };
+    a.onended=()=>done(true);
+    a.onerror=()=>done(false);
+    setTimeout(()=>{ if(!started && !settled){ try{a.pause();}catch(e){} done(false); } },8000);
+    a.play().catch(()=>done(false));
   });
 }
+function speakUtter(text,tok){
+  return new Promise(res=>{
+    if(!("speechSynthesis" in window)) return res(false);
+    const want=SPEECH_LOCALE[lang];
+    if(!want) return res(false);                     // no recognition locale (hmn)
+    const vs=speechSynthesis.getVoices();
+    const cands=vs.filter(v=>(v.lang||"").toLowerCase().indexOf(want.slice(0,2).toLowerCase())===0);
+    if(vs.length && !cands.length) return res(false); // device lacks this language
+    const fem=/female|jenny|aria|ava|zira|susan|sonia|libby|natasha|michelle|sabina|dalia|paulina|helena|camila|hoai|linh|blessica|rosa|angela|swara|vaani|heera/i;
+    const voice=cands.find(v=>fem.test(v.name))||cands[0]||null;
+    const u=new SpeechSynthesisUtterance(text);
+    u.lang=want; if(voice) u.voice=voice;
+    u.rate=0.92; u.pitch=1.05;                       // softer, calmer delivery
+    let settled=false;
+    const done=ok=>{ if(settled) return; settled=true;
+      if(ok) window.__readPlan.push({t:text,mode:"tts"});
+      res(ok); };
+    u.onend=()=>done(true);
+    u.onerror=()=>done(false);
+    setTimeout(()=>done(false), Math.min(20000, 3000+text.length*130)); // engine-hang guard
+    try{ speechSynthesis.speak(u); }catch(e){ done(false); }
+  });
+}
+async function speakPage(){
+  const chunks=pageSpeechChunks();
+  if(!chunks.length) return;
+  const tok=++speakToken;
+  const b=document.getElementById("readBtn");
+  b.classList.add("on"); b.setAttribute("aria-pressed","true"); b.textContent="⏹";
+  let played=0;
+  for(const c of chunks){
+    if(tok!==speakToken) return;                     // stopped / navigated away
+    let ok = CLIP_LANGS[lang] ? await playClip(c,tok) : false;
+    if(!ok && tok===speakToken) ok = await speakUtter(c,tok);
+    if(ok) played++;
+  }
+  if(tok!==speakToken) return;
+  stopSpeak();
+  if(!played){
+    alert(X("Sorry — no {0} voice is installed on this device, so read-aloud isn't available.","Lo sentimos — este dispositivo no tiene una voz en {0}, así que la lectura en voz alta no está disponible.",[langName(lang)]));
+  }
+}
 document.getElementById("readBtn").onclick=()=>{
-  if(("speechSynthesis" in window) && speechSynthesis.speaking){ stopSpeak(); return; }
+  const b=document.getElementById("readBtn");
+  if(b.classList.contains("on")){ stopSpeak(); return; }
   speakPage();
 };
 
