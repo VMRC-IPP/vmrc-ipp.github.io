@@ -712,6 +712,11 @@ const LS = (function(){
 })();
 if (location.search.indexOf("fresh") > -1) LS.remove(SAVE_KEY);  // preview "start fresh"
 let lang = LS.get(SAVE_KEY+"_lang") || "en";
+// ?lang= from the coordinator's personalized link opens the form in the family's
+// language (e.g. ?lang=hmn). URL wins over the saved choice — the link reflects
+// what the coordinator knows about the family.
+{ const _ul=(new URLSearchParams(location.search).get("lang")||"").toLowerCase();
+  if(["en","es","hmn","vi","tl","pa"].indexOf(_ul)>-1){ lang=_ul; LS.set(SAVE_KEY+"_lang",_ul); } }
 let data = {};
 try { data = JSON.parse(LS.get(SAVE_KEY)) || {}; } catch(e){ data = {}; }
 let idx = (typeof data.__step === "number") ? data.__step : -1; // -1 = welcome
