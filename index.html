@@ -360,8 +360,15 @@
   .done-next .e{font-size:18px;flex:none}
   /* Microsoft Bookings "pick a meeting time" button (thank-you screen) */
   .done-next .booknav{background:none;border:none;padding:0;margin-top:2px}
-  .booknav .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+  .booknav .btn,.bookcard .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
     text-decoration:none;box-sizing:border-box}
+  /* Booking card on the meeting-preferences step */
+  .bookcard{background:var(--card);border:1.5px solid var(--fieldline);border-radius:14px;
+    padding:14px 15px;display:grid;gap:12px}
+  .bookcard .bkhead{display:flex;gap:10px;align-items:flex-start;font-size:14px}
+  .bookcard .bkcal{font-size:19px;flex:none}
+  /* Booking line on the welcome screen */
+  .bookwel a{color:inherit}
 </style>
 </head>
 <body>
@@ -655,6 +662,9 @@ const STEPS = [
           {v:"Afternoons (12:00 – 4:00 PM)",en:"Afternoons (12:00 – 4:00 PM)",es:"Tardes (12:00 – 4:00 PM)"},
           {v:"Either morning or afternoon",en:"Either morning or afternoon",es:"Mañana o tarde"},
         ]},
+      /* Microsoft Bookings card — shown only when VMRC_CONFIG.bookingUrl is set;
+         never appears in the review screen or the payload (type "booking"). */
+      {key:"book_now", type:"booking", label:{en:"Pick a meeting time",es:"Elegir la hora de la reunión"}},
       {key:"doc_language", type:"chips", single:1, optional:1, label:{en:"Preferred language for the written plan",es:"Idioma preferido para el plan escrito"},
         options:[{v:"English",en:"English",es:"Inglés"},{v:"Spanish",en:"Spanish",es:"Español"},{v:"Hmong",en:"Hmong (Hmoob)",es:"Hmong (Hmoob)"},{v:"Vietnamese",en:"Vietnamese (Tiếng Việt)",es:"Vietnamita (Tiếng Việt)"},{v:"Tagalog",en:"Tagalog",es:"Tagalo"},{v:"Punjabi",en:"Punjabi (ਪੰਜਾਬੀ)",es:"Punyabí (ਪੰਜਾਬੀ)"},{v:"Other",en:"Other",es:"Otro"}]},
       {key:"anything_else", type:"textarea", optional:1, label:{en:"Anything else you'd like your coordinator to know?",es:"¿Algo más que le gustaría que su coordinador sepa?"}, ph:{en:"Optional — the floor is yours",es:"Opcional — es su espacio"}},
@@ -842,6 +852,7 @@ function renderWelcome(){
   const inviteName = (new URLSearchParams(location.search).get("name")||"").trim().slice(0,40);
   const coordName  = window.VMRC_CONFIG.coordinatorName || "your coordinator";
   const coordPhone = (window.VMRC_CONFIG.coordinatorPhone||"").trim();
+  const bookUrl    = (window.VMRC_CONFIG.bookingUrl||"").trim();
   const phoneLine  = coordPhone
     ? (X("Prefer to do this by phone? Call {0} at {1}.","¿Prefiere hacerlo por teléfono? Llame a {0} al {1}.",[esc(coordName),esc(coordPhone)]))
     : (X("Prefer to do this by phone? Just reply to the message they sent and they'll call you.","¿Prefiere hacerlo por teléfono? Solo responda al mensaje que le enviaron y le llamarán."));
@@ -860,6 +871,10 @@ function renderWelcome(){
       <span class="ti">🛡️</span>
       <span>${X("This secure form was sent to you by <b>{0}</b>, your VMRC Service Coordinator. {1}","Este formulario seguro fue enviado por <b>{0}</b>, su Coordinador de Servicios de VMRC. {1}",[esc(coordName),phoneLine])}</span>
     </div>
+    ${ bookUrl ? `<div class="trust bookwel">
+      <span class="ti">📅</span>
+      <span>${X("Want to pick the meeting time yourself? Choose a time that works for you — online or in person.","¿Quiere elegir usted la hora de la reunión? Escoja el horario que mejor le convenga — en línea o en persona.")} <a href="${esc(bookUrl)}" target="_blank" rel="noopener" id="welBookLink"><b>${X("Pick a meeting time","Elegir la hora de la reunión")} →</b></a></span>
+    </div>` : "" }
     <div class="langpick">
       ${LANGS.map(L=>`<div class="chip ${lang===L.c?"on":""}" role="button" tabindex="0" aria-pressed="${lang===L.c}" data-l="${L.c}">${L.f?L.f+" ":""}${L.n}</div>`).join("")}
     </div>
@@ -902,6 +917,16 @@ function fieldHTML(f){
   // info-only note (no input) — e.g. Medic Alert "would like info"
   if (f.type==="note"){
     return `<div class="field" data-fieldkey="${f.key}" ${hide}><div class="notebox"><span>ℹ️</span><span>${tx(f.label)}</span></div></div>`;
+  }
+  // Microsoft Bookings calendar card — Microsoft's CSP blocks true embedding
+  // (frame-ancestors), so the card opens the live calendar in a new tab.
+  if (f.type==="booking"){
+    const u=(window.VMRC_CONFIG.bookingUrl||"").trim();
+    if(!u) return "";
+    return `<div class="field" data-fieldkey="${f.key}"><div class="bookcard">
+      <div class="bkhead"><span class="bkcal">📅</span><span class="bktx">${X("Want to pick the meeting time yourself? Choose a time that works for you — online or in person.","¿Quiere elegir usted la hora de la reunión? Escoja el horario que mejor le convenga — en línea o en persona.")}</span></div>
+      <a class="btn primary" id="stepBookBtn" href="${esc(u)}" target="_blank" rel="noopener">📅 ${X("Pick a meeting time","Elegir la hora de la reunión")}</a>
+    </div></div>`;
   }
   const optTag = f.optional ? `<span class="opt">${X("optional","opcional")}</span>` : "";
   const hint = f.hint ? `<div class="hint">${tx(f.hint)}</div>` : "";
@@ -1222,7 +1247,7 @@ function renderReview(){
     html+=`<div id="nameWarn" style="background:#fdecea;border:1px solid #f3bdb6;color:#9a2820;border-radius:10px;padding:11px 13px;margin:0 0 14px;font-size:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">⚠️ <b>${X("The person's name is missing","Falta el nombre de la persona")}</b> — ${X("it's the only thing needed to send.","es lo único necesario para enviar.")} <a href="#" id="fixName" style="color:#9a2820;font-weight:700">${X("Add the name (step 1) →","Agregar nombre (paso 1) →")}</a></div>`;
   }
   STEPS.forEach((step,si)=>{
-    const items=step.fields.filter(f=>f.type!=="note").map(f=>{
+    const items=step.fields.filter(f=>f.type!=="note"&&f.type!=="booking").map(f=>{
       const val=displayVal(f);
       return `<div class="rev-item"><div class="k">${tx(f.label)}</div><div class="v ${val?"":"empty"}">${val?esc(val):tx(T.blank)}</div></div>`;
     }).join("");
@@ -1539,7 +1564,7 @@ function wireMic(node,step){
 function buildPayload(){
   const answers={};
   const SKIP=["legal_name","preferred_name","dob"];  // captured at top level; avoid duplicate Sheet columns
-  STEPS.forEach(s=>s.fields.forEach(f=>{ if(f.type!=="note" && !SKIP.includes(f.key)) answers[f.key]=displayVal(f); }));
+  STEPS.forEach(s=>s.fields.forEach(f=>{ if(f.type!=="note" && f.type!=="booking" && !SKIP.includes(f.key)) answers[f.key]=displayVal(f); }));
   return {
     submittedAt: new Date().toISOString(),
     lang,
